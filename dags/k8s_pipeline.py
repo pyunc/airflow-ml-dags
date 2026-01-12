@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-from airflow.providers.docker.operators.docker import DockerOperator
+from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 import os
 
 default_args = {
@@ -112,16 +112,20 @@ with DAG(
         python_callable=deploy_model,
     )
     
-    # Docker task to run ML base container
-    docker_task = DockerOperator(
+    # Kubernetes Pod task to run ML base container
+    k8s_task = KubernetesPodOperator(
         task_id='run_ml_base_container',
+        name='ml-base-container-pod',
+        namespace='airflow',
         image='pauloyuncha/ml-base:latest',
-        command='sh -c "echo Running ML base container && python --version"',
-        docker_url='unix://var/run/docker.sock',  # Use the Docker daemon from the host
-        network_mode='bridge',
-        auto_remove='success',  # Options: 'never', 'success', or 'force'
-        mount_tmp_dir=False,
+        cmds=['sh', '-c'],
+        arguments=['echo "Running ML base container" && python --version && pip list | head -10'],
+        image_pull_policy='Always',
+        in_cluster=True,
+        get_logs=True,
+        is_delete_operator_pod=True,
+        startup_timeout_seconds=300,
     )
     
     # Define task dependencies
-    load_task >> preprocess_task >> train_task >> evaluate_task >> docker_task >> deploy_task
+    load_task >> preprocess_task >> train_task >> evaluate_task >> k8s_task >> deploy_task
